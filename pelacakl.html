@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pelacak Lari</title>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body {
+      font-family: 'Merriweather', serif;
+      background-color: #2d3f4e;
+      color: #ebe5db;
+      margin: 0;
+      padding: 0;
+      text-align: center;
+    }
+    #map {
+      height: 300px;
+      margin: 1rem;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+      background-color: #ebe5db;
+      color: #2d3f4e;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #info {
+      margin-top: 10px;
+      background-color: #3a4f63;
+      padding: 10px;
+      border-radius: 10px;
+      display: inline-block;
+    }
+    #riwayat {
+      margin: 20px;
+    }
+    #riwayat ul {
+      list-style: none;
+      padding: 0;
+    }
+    #riwayat li {
+      background-color: #3a4f63;
+      margin: 5px auto;
+      padding: 8px 12px;
+      width: fit-content;
+      border-radius: 6px;
+      color: #ebe5db;
+    }
+  </style>
+</head>
+<body>
+  <h2>Pelacak Lari</h2>
+
+  <div id="map"></div>
+
+  <div id="info">
+    ⏱ Waktu: <span id="timer">0:00</span><br />
+    📏 Jarak: <span id="distance">0</span> m<br />
+    🚀 Kecepatan: <span id="speed">0</span> km/jam
+  </div>
+
+  <button onclick="mulaiLari()">Mulai</button>
+  <button onclick="stopLari()">Stop</button>
+  <button onclick="hapusRiwayat()">Hapus Riwayat</button>
+
+  <div id="riwayat">
+    <h3>Riwayat Lari</h3>
+    <ul id="riwayatList"></ul>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    let map = L.map('map').setView([-6.2, 106.8166], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          map.setView([latitude, longitude], 15);
+          L.circleMarker([latitude, longitude], { radius: 6, color: 'green' }).addTo(map).bindPopup('Lokasi Anda').openPopup();
+        },
+        (err) => console.warn("Gagal mendeteksi lokasi awal: ", err.message),
+        { enableHighAccuracy: true }
+      );
+    }
+
+    let timerInterval;
+    let watchId;
+    let waktu = 0;
+    let totalJarak = 0;
+    let lokasiSebelumnya = null;
+    let polyline = null;
+    let pathCoords = [];
+
+    function mulaiLari() {
+      waktu = 0;
+      totalJarak = 0;
+      lokasiSebelumnya = null;
+      pathCoords = [];
+      if (polyline) {
+        map.removeLayer(polyline);
+        polyline = null;
+      }
+      document.getElementById("distance").innerText = "0";
+      document.getElementById("timer").innerText = "0:00";
+      document.getElementById("speed").innerText = "0";
+
+      timerInterval = setInterval(() => {
+        waktu++;
+        const menit = Math.floor(waktu / 60);
+        const detik = waktu % 60;
+        document.getElementById("timer").innerText = `${menit}:${detik.toString().padStart(2, "0")}`;
+      }, 1000);
+
+      if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            const posisiBaru = L.latLng(latitude, longitude);
+            map.setView(posisiBaru);
+            pathCoords.push(posisiBaru);
+
+            if (polyline) {
+              polyline.setLatLngs(pathCoords);
+            } else {
+              polyline = L.polyline(pathCoords, { color: 'red' }).addTo(map);
+            }
+
+            if (lokasiSebelumnya) {
+              const jarak = posisiBaru.distanceTo(lokasiSebelumnya);
+              totalJarak += jarak;
+              document.getElementById("distance").innerText = Math.round(totalJarak);
+              const kecepatan = (totalJarak / waktu) * 3.6;
+              document.getElementById("speed").innerText = kecepatan.toFixed(2);
+            }
+            lokasiSebelumnya = posisiBaru;
+          },
+          (err) => alert("Gagal ambil lokasi: " + err.message),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        );
+      } else {
+        alert("Geolocation tidak didukung di perangkat ini.");
+      }
+    }
+
+    function stopLari() {
+      clearInterval(timerInterval);
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+
+      const kecepatan = waktu > 0 ? ((totalJarak / waktu) * 3.6).toFixed(2) : "0";
+      const menit = Math.floor(waktu / 60);
+      const detik = waktu % 60;
+      const waktuString = `${menit}:${detik.toString().padStart(2, "0")}`;
+
+      const riwayat = JSON.parse(localStorage.getItem("riwayatLari") || "[]");
+      riwayat.push({
+        tanggal: new Date().toLocaleString(),
+        jarak: Math.round(totalJarak),
+        waktu: waktuString,
+        kecepatan
+      });
+      localStorage.setItem("riwayatLari", JSON.stringify(riwayat));
+      tampilkanRiwayat();
+    }
+
+    function tampilkanRiwayat() {
+      const list = document.getElementById("riwayatList");
+      list.innerHTML = "";
+      const riwayat = JSON.parse(localStorage.getItem("riwayatLari") || "[]");
+      riwayat.reverse().forEach((r) => {
+        const item = `${r.tanggal} – ${r.jarak}m | ⏱ ${r.waktu} | 🚀 ${r.kecepatan} km/jam`;
+        const li = document.createElement("li");
+        li.innerText = item;
+        list.appendChild(li);
+      });
+    }
+
+    function hapusRiwayat() {
+      localStorage.removeItem("riwayatLari");
+      tampilkanRiwayat();
+    }
+
+    tampilkanRiwayat();
+  </script>
+</body>
+</html>
